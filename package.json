@@ -1,0 +1,33 @@
+{
+  "name": "discord_bot",
+  "version": "1.0.0",
+  "description": "A simple Discord bot",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch --include .env src/index.ts",
+    "build": "tsc",
+    "register": "tsx src/deploy-commands.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@expo-google-fonts/noto-sans": "^0.4.2",
+    "@expo-google-fonts/noto-sans-mono": "^0.4.2",
+    "@napi-rs/canvas": "^1.0.10",
+    "@twemoji/svg": "^15.0.0",
+    "discord.js": "^14.27.0",
+    "dotenv": "^18.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
