@@ -3,9 +3,10 @@ import type { Command, MessageCommand } from "./types.js";
 import { echo } from "./echo.js";
 import { ping } from "./ping.js";
 import { receiptMultiple, receiptThis } from "./receipt.js";
+import { reindex } from "./reindex.js";
 import { repost } from "./repost.js";
 
-const all: Command[] = [ping, echo, repost];
+const all: Command[] = [ping, echo, repost, reindex];
 const allMessage: MessageCommand[] = [receiptThis, receiptMultiple];
 
 export const commands = new Collection<string, Command>(

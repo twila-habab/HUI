@@ -197,6 +197,31 @@ function buildRepost(message: Message) {
   };
 }
 
+/**
+ * Throws away this server's saved message list and rescans the receipts
+ * channel. Returns how many repostable messages it found, or a reason it
+ * couldn't run.
+ */
+export async function reindex(guildId: string): Promise<number | "disabled" | "busy"> {
+  const feed = feedFor(guildId);
+  if (!feed) return "disabled";
+  if (!feed.ready) return "busy";
+
+  feed.ready = false;
+  feed.store.reset();
+  try {
+    // Messages posted during the rescan are still added live, since caughtUp
+    // stays true; the rescan walks back from the newest message it sees.
+    await backfill(feed.source, feed.store);
+    await feed.store.save();
+    console.log(`Reindexed #${feed.source.name}: ${feed.store.size} repostable message(s).`);
+    return feed.store.size;
+  } finally {
+    // Even after a failure, a partial list is better than /repost being stuck.
+    feed.ready = true;
+  }
+}
+
 export type Repost = ReturnType<typeof buildRepost>;
 
 /** A random message from this server's receipts channel, ready to post. */

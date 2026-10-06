@@ -79,6 +79,15 @@ export class MessageStore {
     this.dirty = true;
   }
 
+  /** Forgets everything, so the next backfill rescans the whole channel. */
+  reset(): void {
+    this.ids.clear();
+    this.newestId = undefined;
+    this.oldestId = undefined;
+    this.complete = false;
+    this.dirty = true;
+  }
+
   markComplete(): void {
     this.complete = true;
     this.dirty = true;
