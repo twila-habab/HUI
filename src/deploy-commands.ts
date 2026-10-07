@@ -1,4 +1,4 @@
-import { REST, Routes } from "discord.js";
+import { DiscordAPIError, REST, Routes } from "discord.js";
 import { commands, messageCommands } from "./commands/index.js";
 import { config } from "./config.js";
 
@@ -13,7 +13,14 @@ if (config.guildIds.length === 0) {
   console.log(`Registered ${body.length} command(s) globally.`);
 } else {
   for (const guildId of config.guildIds) {
-    await rest.put(Routes.applicationGuildCommands(config.clientId, guildId), { body });
-    console.log(`Registered ${body.length} command(s) to guild ${guildId}.`);
+    try {
+      await rest.put(Routes.applicationGuildCommands(config.clientId, guildId), { body });
+      console.log(`Registered ${body.length} command(s) to guild ${guildId}.`);
+    } catch (error) {
+      // Keep going so one server the bot isn't in doesn't block the rest.
+      const reason = error instanceof DiscordAPIError && error.code === 50001 ? "the bot isn't in that server" : error;
+      console.warn(`Skipped guild ${guildId}:`, reason);
+      process.exitCode = 1;
+    }
   }
 }
