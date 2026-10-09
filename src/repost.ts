@@ -110,7 +110,7 @@ export async function setupRepost(client: Client<true>): Promise<void> {
 
   if ([...feeds.values()].some((feed) => feed.general)) {
     scheduleDailyReceipts();
-    console.log("Posting a daily receipt into the general channels at 23:10 UTC.");
+    console.log("Posting a daily receipt into the general channels at 00:00 UTC.");
   }
 
   // One at a time, so the servers don't compete for the same rate limit.
@@ -234,10 +234,10 @@ export async function randomRepost(guildId: string): Promise<Repost | null> {
 }
 
 const DAILY_CAPTION = "🧾 **Today's daily receipt**";
-const DAILY_HOUR_UTC = 23;
-const DAILY_MINUTE_UTC = 10;
+const DAILY_HOUR_UTC = 0;
+const DAILY_MINUTE_UTC = 0;
 
-/** Posts a random receipt into each server's general channel every day at 23:10 UTC. */
+/** Posts a random receipt into each server's general channel every day at 00:00 UTC. */
 function scheduleDailyReceipts(): void {
   // Measured from a second ahead, so a timer that fires a hair early can't
   // schedule a second post for the same day.
