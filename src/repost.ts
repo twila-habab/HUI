@@ -10,6 +10,7 @@ import {
   type GuildTextBasedChannel,
   type Message,
 } from "discord.js";
+import { setTimeout as delay } from "node:timers/promises";
 import { config } from "./config.js";
 import { isNewer, MessageStore } from "./messageStore.js";
 
@@ -19,7 +20,7 @@ const SAVE_INTERVAL_MS = 30_000;
 
 /**
  * One server's repost setup: random messages are picked from `source`. /repost
- * posts them wherever it's used; `general`, if set, also gets scheduled ones.
+ * posts them wherever it's used; `general`, if set, also gets a daily one.
  */
 interface Feed {
   name: string;
@@ -107,6 +108,11 @@ export async function setupRepost(client: Client<true>): Promise<void> {
     process.once(signal, () => void saveAll().finally(() => process.exit(0)));
   }
 
+  if ([...feeds.values()].some((feed) => feed.general)) {
+    scheduleDailyReceipts();
+    console.log("Posting a daily receipt into the general channels at 00:00 UTC.");
+  }
+
   // One at a time, so the servers don't compete for the same rate limit.
   for (const feed of feeds.values()) {
     try {
@@ -120,11 +126,6 @@ export async function setupRepost(client: Client<true>): Promise<void> {
     } catch (error) {
       console.error(`Indexing #${feed.source.name} failed:`, error);
     }
-  }
-
-  if (config.repostIntervalMinutes && [...feeds.values()].some((feed) => feed.general)) {
-    setInterval(() => void scheduledRepost(), config.repostIntervalMinutes * 60_000);
-    console.log(`Reposting automatically every ${config.repostIntervalMinutes} minute(s).`);
   }
 }
 
@@ -232,14 +233,40 @@ export async function randomRepost(guildId: string): Promise<Repost | null> {
   return message && buildRepost(message);
 }
 
-async function scheduledRepost(): Promise<void> {
-  for (const feed of feeds.values()) {
-    if (!feed.general) continue;
-    try {
-      const repost = await randomRepost(feed.source.guildId);
-      if (repost) await feed.general.send(repost);
-    } catch (error) {
-      console.error(`Scheduled repost to #${feed.general.name} (${feed.name}) failed:`, error);
-    }
+const DAILY_CAPTION = "🧾 **Today's daily receipt**";
+const DAILY_HOUR_UTC = 0;
+const DAILY_MINUTE_UTC = 0;
+
+/** Posts a random receipt into each server's general channel every day at 00:00 UTC. */
+function scheduleDailyReceipts(): void {
+  // Measured from a second ahead, so a timer that fires a hair early can't
+  // schedule a second post for the same day.
+  const from = new Date(Date.now() + 1_000);
+  let next = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate(), DAILY_HOUR_UTC, DAILY_MINUTE_UTC);
+  // Today's post time has already passed, so use tomorrow's.
+  if (next <= from.getTime()) {
+    next = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate() + 1, DAILY_HOUR_UTC, DAILY_MINUTE_UTC);
   }
+  setTimeout(() => {
+    scheduleDailyReceipts();
+    void postDailyReceipts();
+  }, next - Date.now());
+}
+
+async function postDailyReceipts(): Promise<void> {
+  await Promise.all(
+    [...feeds.values()].map(async (feed) => {
+      if (!feed.general) return;
+      try {
+        // Right after a restart (or during /reindex) the channel may still be
+        // being read; wait up to 30 minutes for it rather than skipping the day.
+        for (let tries = 0; !feed.ready && tries < 60; tries++) await delay(30_000);
+        const repost = await randomRepost(feed.source.guildId);
+        if (repost) await feed.general.send({ ...repost, content: DAILY_CAPTION });
+        else console.warn(`No daily receipt for ${feed.name}: nothing to pick from #${feed.source.name}.`);
+      } catch (error) {
+        console.error(`Daily receipt for #${feed.general.name} (${feed.name}) failed:`, error);
+      }
+    }),
+  );
 }

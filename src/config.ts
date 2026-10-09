@@ -6,11 +6,6 @@ function required(name: string): string {
   return value;
 }
 
-function positiveNumber(name: string): number | undefined {
-  const value = Number(process.env[name]);
-  return value > 0 ? value : undefined;
-}
-
 /** Reads a comma-separated list, e.g. "123, 456". */
 function list(name: string): string[] {
   return (process.env[name] ?? "")
@@ -19,7 +14,10 @@ function list(name: string): string[] {
     .filter(Boolean);
 }
 
-/** One server's channels: random reposts go from `receiptsChannelId` into `generalChannelId`. */
+/**
+ * One server's channels. /repost picks from `receiptsChannelId`, and a daily
+ * receipt from there is posted into `generalChannelId` at 00:00 UTC.
+ */
 export interface ServerChannels {
   name: string;
   receiptsChannelId: string;
