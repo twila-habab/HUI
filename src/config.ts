@@ -34,14 +34,12 @@ export const config = {
   token: required("DISCORD_TOKEN"),
   clientId: required("CLIENT_ID"),
   guildIds: list("GUILD_ID"),
-  // /repost works in any channel. The *_GENERAL channels stay in
-  // .env but aren't read; pass them back in here to also get scheduled reposts
-  // (REPOST_INTERVAL_MINUTES) in those channels.
+  // Only anon gets the daily receipt; pass HANGOUT_GENERAL / GFORCE_GENERAL back
+  // in below to turn it on for those servers too.
   servers: [
-    ...server("anon", "DISCORD_RECEIPTS_ID"),
+    ...server("anon", "DISCORD_RECEIPTS_ID", "ANON_GENERAL"),
     ...server("hangout", "FUNNIES_ID"),
     ...server("gforce", "RECEIPTS_OF_SHAME_ID"),
   ],
-  repostIntervalMinutes: positiveNumber("REPOST_INTERVAL_MINUTES"),
   dataDir: process.env.DATA_DIR || "data",
 };
