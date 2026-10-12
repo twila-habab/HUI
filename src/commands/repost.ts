@@ -19,15 +19,26 @@ export const repost: Command = {
       return;
     }
 
-    // Defer privately so that if picking fails, only the user sees the error.
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const repost = await randomRepost(interaction.guildId!);
+    // Defer publicly and edit the repost in, so Discord shows who used /repost.
+    // (Deleting a private placeholder and following up instead leaves a
+    // "Message could not be loaded" header on the repost.)
+    await interaction.deferReply();
+    let repost;
+    try {
+      repost = await randomRepost(interaction.guildId!);
+    } catch (error) {
+      // Don't leave a public "thinking..." behind; the error goes to the user privately.
+      await interaction.deleteReply().catch(() => {});
+      throw error;
+    }
     if (!repost) {
-      await interaction.editReply("There's nothing in the receipts channel to repost.");
+      await interaction.deleteReply();
+      await interaction.followUp({
+        content: "There's nothing in the receipts channel to repost.",
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
-    // Swap the private placeholder for the public repost in this channel.
-    await interaction.deleteReply();
-    await interaction.followUp(repost);
+    await interaction.editReply(repost);
   },
 };
