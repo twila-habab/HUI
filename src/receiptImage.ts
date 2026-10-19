@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { createCanvas, GlobalFonts, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
-import { MessageType, StickerFormatType, type Message } from "discord.js";
+import { MessageType, StickerFormatType, type Embed, type Message, type MessageSnapshot } from "discord.js";
 
 // Renders a message as a PNG that looks like Discord's dark theme. Fonts and
 // emoji ship as npm packages so it renders the same on hosts without system fonts.
@@ -50,6 +50,9 @@ const EMOJI_SIZE = 22;
 const JUMBO_SIZE = 48;
 const MEDIA_MAX = { width: 400, height: 300 };
 const STICKER_SIZE = 160;
+const EMBED_MAX_WIDTH = 432;
+const EMBED_THUMBNAIL = 80;
+const EMBED_LINE_HEIGHT = 18;
 
 const dateFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "short", timeStyle: "short" });
 
@@ -64,6 +67,14 @@ interface Style {
   color?: string;
   background?: string;
 }
+
+/** A message, or a forwarded message's snapshot of one. */
+type Source = Pick<
+  MessageSnapshot,
+  "content" | "embeds" | "attachments" | "stickers" | "editedTimestamp" | "guild" | "client" | "messageSnapshots"
+>;
+/** What mentions in some text are looked up against. */
+type Context = Pick<Source, "guild" | "client">;
 
 type Piece =
   | { kind: "text"; text: string; style: Style }
@@ -157,6 +168,7 @@ const INLINE = new RegExp(
     /<@&(?<role>\d+)>/,
     /<#(?<channel>\d+)>/,
     /<t:(?<time>-?\d+)(?::[tTdDfFR])?>/,
+    /\[(?<linkText>[^\]\n]+)\]\(<?(?<linkUrl>https?:\/\/[^\s)>]+)>?\)/,
     /(?<url>https?:\/\/[^\s<]+[^\s<.,:;"')\]])/,
     /\*\*(?<bold>[\s\S]+?)\*\*(?!\*)/,
     /__(?<underline>[\s\S]+?)__(?!_)/,
@@ -196,7 +208,7 @@ async function plain(text: string, style: Style): Promise<Piece[]> {
   return pieces;
 }
 
-async function userName(message: Message, id: string): Promise<string> {
+async function userName(message: Context, id: string): Promise<string> {
   const member = await message.guild?.members.fetch(id).catch(() => null);
   if (member) return member.displayName;
   const user = await message.client.users.fetch(id).catch(() => null);
@@ -204,7 +216,7 @@ async function userName(message: Message, id: string): Promise<string> {
 }
 
 /** Parses Discord markdown, mentions and emoji into drawable pieces. */
-async function parse(text: string, style: Style, message: Message): Promise<Piece[]> {
+async function parse(text: string, style: Style, message: Context): Promise<Piece[]> {
   const pieces: Piece[] = [];
   let last = 0;
   for (const match of text.matchAll(INLINE)) {
@@ -232,6 +244,8 @@ async function parse(text: string, style: Style, message: Message): Promise<Piec
     } else if (g.time) {
       const date = dateFormat.format(new Date(Number(g.time) * 1000));
       pieces.push({ kind: "text", text: date, style: { ...style, background: COLORS.timestampBackground } });
+    } else if (g.linkText !== undefined) {
+      pieces.push(...(await parse(g.linkText, { ...style, color: COLORS.link }, message)));
     } else if (g.url) {
       pieces.push({ kind: "text", text: g.url, style: { ...style, color: COLORS.link } });
     } else if (g.bold !== undefined) {
@@ -263,7 +277,7 @@ function textAtom(text: string, style: Style): Atom {
   return {
     kind: /^\s+$/.test(text) ? "space" : "word",
     width,
-    height: LINE_HEIGHT,
+    height: Math.round(size * 1.375),
     draw(ctx, x, centerY) {
       if (style.background) {
         ctx.fillStyle = style.background;
@@ -349,15 +363,15 @@ function toAtoms(pieces: Piece[], maxWidth: number, inlineEmojiSize = EMOJI_SIZE
 }
 
 /** Word-wraps atoms into lines, each returned as a block. */
-function wrap(atoms: Atom[], maxWidth: number): Block[] {
+function wrap(atoms: Atom[], maxWidth: number, lineHeight = LINE_HEIGHT): Block[] {
   const lines: { atoms: { atom: Atom; x: number }[]; height: number }[] = [];
-  let line: (typeof lines)[number] = { atoms: [], height: LINE_HEIGHT };
+  let line: (typeof lines)[number] = { atoms: [], height: lineHeight };
   let x = 0;
   let wrapped = false;
   let afterBlock = false;
   const newLine = (isWrap: boolean) => {
     lines.push(line);
-    line = { atoms: [], height: LINE_HEIGHT };
+    line = { atoms: [], height: lineHeight };
     x = 0;
     wrapped = isWrap;
   };
@@ -431,8 +445,8 @@ function mediaBlock(image: Image, maxWidth: number, maxHeight: number): Block {
   };
 }
 
-async function fileBlock(name: string): Promise<Block> {
-  const boxWidth = Math.min(CONTENT_WIDTH, 400);
+async function fileBlock(name: string, maxWidth: number): Promise<Block> {
+  const boxWidth = Math.min(maxWidth, 400);
   const label = await singleLine(`📎 ${name}`, { color: COLORS.link }, boxWidth - 24);
   return {
     height: 48,
@@ -508,27 +522,186 @@ async function replyHeader(message: Message): Promise<Block | undefined> {
   };
 }
 
-/** The content, attachments, media embeds and stickers of one message. */
-async function messageBody(message: Message): Promise<Block[]> {
+function spacer(height: number): Block {
+  return { height, draw() {} };
+}
+
+/** Text with markdown and mentions, word-wrapped to `width`. */
+async function paragraph(text: string, style: Style, context: Context, width: number, lineHeight = LINE_HEIGHT) {
+  const emojiSize = Math.min(EMOJI_SIZE, lineHeight);
+  return wrap(toAtoms(await parse(text, style, context), width, emojiSize, false), width, lineHeight);
+}
+
+function assetUrl(asset: { proxyURL?: string; url?: string } | null | undefined): string | undefined {
+  return asset?.proxyURL ?? asset?.url;
+}
+
+/** One line of text after an optional round icon, as in an embed's author and footer. */
+async function iconLine(iconUrl: string | undefined, text: string, style: Style, iconSize: number, maxWidth: number) {
+  const icon = iconUrl ? await loadRemote(iconUrl) : undefined;
+  const indent = icon ? iconSize + 8 : 0;
+  const line = await singleLine(text, style, maxWidth - indent);
+  return {
+    height: iconSize,
+    draw(ctx, x, top) {
+      if (icon) drawAvatar(ctx, icon, x, top, iconSize);
+      line.draw(ctx, x + indent, top + iconSize / 2);
+    },
+  } satisfies Block;
+}
+
+/** Inline fields sit side by side, up to `perRow` at a time; the rest get a row each. */
+async function embedFields(embed: Embed, context: Context, width: number, perRow: number): Promise<Block[]> {
+  const rows: Embed["fields"][] = [];
+  for (const field of embed.fields) {
+    const row = rows.at(-1);
+    if (field.inline && row?.[0]?.inline && row.length < perRow) row.push(field);
+    else rows.push([field]);
+  }
+  const gap = 8;
+  return Promise.all(
+    rows.map(async (row) => {
+      const columnWidth = (width - gap * (row.length - 1)) / row.length;
+      const columns = await Promise.all(
+        row.map(async (field) =>
+          stacked([
+            ...(await paragraph(field.name, { size: 14, semibold: true, color: COLORS.name }, context, columnWidth, EMBED_LINE_HEIGHT)),
+            ...(await paragraph(field.value, { size: 14 }, context, columnWidth, EMBED_LINE_HEIGHT)),
+          ]),
+        ),
+      );
+      return {
+        height: Math.max(...columns.map((column) => column.height)) + 4,
+        draw(ctx, x, top) {
+          columns.forEach((column, i) => column.draw(ctx, x + i * (columnWidth + gap), top + 4));
+        },
+      } satisfies Block;
+    }),
+  );
+}
+
+/** A rich embed: a bot's card or a link preview. */
+async function embedBlock(embed: Embed, context: Context, maxWidth: number): Promise<Block | undefined> {
+  const width = Math.min(maxWidth, EMBED_MAX_WIDTH);
+  const padding = 12;
+  const inner = width - 4 - padding * 2;
+
+  // A video can't play in a picture, so its thumbnail becomes the main image.
+  const thumbnailUrl = assetUrl(embed.thumbnail);
+  const largeUrl = assetUrl(embed.image) ?? (embed.data.type === "video" ? thumbnailUrl : undefined);
+  const [large, thumbnail] = await Promise.all([
+    largeUrl ? loadRemote(largeUrl) : undefined,
+    thumbnailUrl && thumbnailUrl !== largeUrl ? loadRemote(thumbnailUrl) : undefined,
+  ]);
+  const textWidth = inner - (thumbnail ? EMBED_THUMBNAIL + 16 : 0);
+
+  // Beside the thumbnail.
+  const top: Block[] = [];
+  if (embed.provider?.name) {
+    top.push(await iconLine(undefined, embed.provider.name, { size: 12, color: COLORS.muted }, 18, textWidth));
+  }
+  if (embed.author?.name) {
+    const icon = assetUrl({ proxyURL: embed.author.proxyIconURL, url: embed.author.iconURL });
+    top.push(await iconLine(icon, embed.author.name, { size: 14, semibold: true, color: COLORS.name }, 24, textWidth));
+  }
+  if (embed.title) {
+    const style: Style = { semibold: true, color: embed.url ? COLORS.link : COLORS.name };
+    top.push(...(await paragraph(embed.title, style, context, textWidth)));
+  }
+  if (embed.description) {
+    top.push(...(await paragraph(embed.description, { size: 14 }, context, textWidth, EMBED_LINE_HEIGHT)));
+  }
+  top.push(...(await embedFields(embed, context, textWidth, thumbnail ? 2 : 3)));
+
+  // Under everything, full width.
+  const bottom: Block[] = [];
+  if (large) bottom.push(mediaBlock(large, inner, MEDIA_MAX.height));
+  const footerText = [embed.footer?.text, embed.timestamp && dateFormat.format(new Date(embed.timestamp))]
+    .filter(Boolean)
+    .join(" • ");
+  if (footerText) {
+    const icon = assetUrl({ proxyURL: embed.footer?.proxyIconURL, url: embed.footer?.iconURL });
+    bottom.push(spacer(4), await iconLine(icon, footerText, { size: 12, color: COLORS.muted }, 20, inner));
+  }
+
+  if (top.length === 0 && bottom.length === 0 && !thumbnail) return undefined;
+  const topColumn = stacked(top);
+  const bottomColumn = stacked(bottom);
+  const thumbnailScale = thumbnail ? Math.min(1, EMBED_THUMBNAIL / thumbnail.width, EMBED_THUMBNAIL / thumbnail.height) : 0;
+  const topHeight = Math.max(topColumn.height, thumbnail ? thumbnail.height * thumbnailScale : 0);
+  const height = padding * 2 + topHeight + bottomColumn.height;
+  return {
+    height: height + 8,
+    draw(ctx, x, blockTop) {
+      const boxTop = blockTop + 4;
+      // The colored bar down the left, then the card over the rest of it.
+      ctx.fillStyle = embed.hexColor ?? COLORS.codeBorder;
+      roundRect(ctx, x, boxTop, width, height, 4);
+      ctx.fillStyle = COLORS.codeBackground;
+      ctx.beginPath();
+      ctx.roundRect(x + 4, boxTop, width - 4, height, [0, 4, 4, 0]);
+      ctx.fill();
+
+      const left = x + 4 + padding;
+      topColumn.draw(ctx, left, boxTop + padding);
+      if (thumbnail) {
+        const w = thumbnail.width * thumbnailScale;
+        const h = thumbnail.height * thumbnailScale;
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(left + inner - w, boxTop + padding, w, h, 4);
+        ctx.clip();
+        ctx.drawImage(thumbnail, left + inner - w, boxTop + padding, w, h);
+        ctx.restore();
+      }
+      bottomColumn.draw(ctx, left, boxTop + padding + topHeight);
+    },
+  };
+}
+
+/** A forwarded message: a bar down the side, a "Forwarded" label, then its body. */
+async function forwardBlock(snapshot: MessageSnapshot, width: number): Promise<Block> {
+  const indent = 12;
+  const label = await singleLine("Forwarded", { size: 14, italic: true, color: COLORS.muted }, width - indent);
+  const body = stacked(await messageBody(snapshot, width - indent));
+  const height = LINE_HEIGHT + body.height;
+  return {
+    height: height + 8,
+    draw(ctx, x, top) {
+      ctx.fillStyle = COLORS.spine;
+      roundRect(ctx, x, top + 4, 4, height, 2);
+      label.draw(ctx, x + indent, top + 4 + LINE_HEIGHT / 2);
+      body.draw(ctx, x + indent, top + 4 + LINE_HEIGHT);
+    },
+  };
+}
+
+/** The content, attachments, embeds, stickers and forwards of one message. */
+async function messageBody(message: Source, width = CONTENT_WIDTH): Promise<Block[]> {
   // Discord hides a link whose only purpose is to show an image or GIF embed.
   const mediaEmbeds = message.embeds.filter((e) => e.data.type === "image" || e.data.type === "gifv");
+  const richEmbeds = message.embeds.filter((e) => !mediaEmbeds.includes(e));
   const content = mediaEmbeds.length > 0 && mediaEmbeds.some((e) => e.url === message.content.trim()) ? "" : message.content;
 
   const pieces = await parse(content, {}, message);
   if (message.editedTimestamp && content) {
     pieces.push({ kind: "text", text: " (edited)", style: { size: 10, color: COLORS.muted } });
   }
-  const body: Block[] = wrap(toAtoms(pieces, CONTENT_WIDTH), CONTENT_WIDTH);
+  const body: Block[] = wrap(toAtoms(pieces, width), width);
 
-  const mediaWidth = Math.min(MEDIA_MAX.width, CONTENT_WIDTH);
+  const mediaWidth = Math.min(MEDIA_MAX.width, width);
   for (const attachment of message.attachments.values()) {
     const image = attachment.contentType?.startsWith("image/") ? await loadRemote(attachment.url) : undefined;
-    body.push(image ? mediaBlock(image, mediaWidth, MEDIA_MAX.height) : await fileBlock(attachment.name));
+    body.push(image ? mediaBlock(image, mediaWidth, MEDIA_MAX.height) : await fileBlock(attachment.name, width));
   }
   for (const embed of mediaEmbeds) {
     const url = embed.thumbnail?.proxyURL ?? embed.thumbnail?.url ?? embed.url;
     const image = url ? await loadRemote(url) : undefined;
     if (image) body.push(mediaBlock(image, mediaWidth, MEDIA_MAX.height));
+  }
+  for (const embed of richEmbeds) {
+    const block = await embedBlock(embed, message, width);
+    if (block) body.push(block);
   }
   for (const sticker of message.stickers.values()) {
     const image =
@@ -536,18 +709,21 @@ async function messageBody(message: Message): Promise<Block[]> {
         ? await loadRemote(sticker.url)
         : undefined;
     const fallback: Piece = { kind: "text", text: `[sticker: ${sticker.name}]`, style: { color: COLORS.muted } };
-    body.push(...(image ? [mediaBlock(image, STICKER_SIZE, STICKER_SIZE)] : wrap(toAtoms([fallback], CONTENT_WIDTH), CONTENT_WIDTH)));
+    body.push(...(image ? [mediaBlock(image, STICKER_SIZE, STICKER_SIZE)] : wrap(toAtoms([fallback], width), width)));
+  }
+  for (const snapshot of message.messageSnapshots?.values() ?? []) {
+    body.push(await forwardBlock(snapshot, width));
   }
   return body;
 }
 
-/** Blocks drawn one under another, starting at the content column. */
+/** Blocks drawn one under another, starting at `x`. */
 function stacked(blocks: Block[]): Block {
   return {
     height: blocks.reduce((sum, block) => sum + block.height, 0),
-    draw(ctx, _x, top) {
+    draw(ctx, x, top) {
       for (const block of blocks) {
-        block.draw(ctx, CONTENT_X, top);
+        block.draw(ctx, x, top);
         top += block.height;
       }
     },
@@ -614,7 +790,8 @@ export async function renderReceipt(messages: Message[]): Promise<Buffer> {
   let y = PAD;
   for (const { gap, block } of sections) {
     y += gap;
-    block.draw(ctx, 0, y);
+    // Headed messages place themselves; continuations start at the content column.
+    block.draw(ctx, CONTENT_X, y);
     y += block.height;
   }
   return canvas.encode("png");
