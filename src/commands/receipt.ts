@@ -11,6 +11,7 @@ import {
   PermissionFlagsBits,
   TextInputBuilder,
   TextInputStyle,
+  type ButtonInteraction,
   type Client,
   type Message,
   type RepliableInteraction,
@@ -29,6 +30,19 @@ async function receiptsChannelFor(client: Client, guildId: string) {
     if (channel?.isSendable() && !channel.isDMBased() && channel.guildId === guildId) return channel;
   }
   return null;
+}
+
+/**
+ * The Delete button's ID carries who made the receipt and where its "Receipted!"
+ * message is, so it keeps working across restarts without storing anything.
+ */
+const DELETE_PREFIX = "receipt-delete";
+
+function receiptButtons(originalUrl: string, deleteId: string) {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Original message").setURL(originalUrl),
+    new ButtonBuilder().setStyle(ButtonStyle.Danger).setLabel("Delete").setCustomId(deleteId),
+  );
 }
 
 /**
@@ -55,17 +69,65 @@ async function postReceipt(interaction: RepliableInteraction, messages: Message[
   const sent = await receipts.send({
     content: `🧾 ${authors} in <#${first.channelId}>, receipted by ${interaction.user}`,
     files: [new AttachmentBuilder(image, { name: "receipt.png" })],
-    components: [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Original message").setURL(first.url),
-      ),
-    ],
+    components: [receiptButtons(first.url, `${DELETE_PREFIX}:${interaction.user.id}`)],
     // Name people without pinging them.
     allowedMentions: { parse: [] },
   });
 
   await interaction.deleteReply();
-  await interaction.followUp(`Receipted! ${sent.url}`);
+  const notice = await interaction.followUp(`Receipted! ${sent.url}`);
+  // Now that the notice exists, point the Delete button at it too.
+  const deleteId = `${DELETE_PREFIX}:${interaction.user.id}:${notice.channelId}:${notice.id}`;
+  await sent.edit({ components: [receiptButtons(first.url, deleteId)] }).catch(() => {});
+}
+
+export function isReceiptDeleteButton(interaction: ButtonInteraction): boolean {
+  return interaction.customId.startsWith(`${DELETE_PREFIX}:`);
+}
+
+/** Deletes a receipt for whoever made it, or anyone who could delete it by hand. */
+export async function deleteReceipt(interaction: ButtonInteraction): Promise<void> {
+  const [, creatorId, noticeChannelId, noticeId] = interaction.customId.split(":");
+  const canModerate = interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages) ?? false;
+  if (interaction.user.id !== creatorId && !canModerate) {
+    await interaction.reply({
+      content: `Only <@${creatorId}> can delete this receipt.`,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
+    });
+    return;
+  }
+
+  // Ask first, privately, so a stray click doesn't throw the receipt away.
+  const confirmId = `receipt-confirm:${interaction.id}`;
+  const cancelId = `receipt-cancel:${interaction.id}`;
+  const prompt = await interaction.reply({
+    content: "Delete this receipt? This can't be undone.",
+    flags: MessageFlags.Ephemeral,
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setStyle(ButtonStyle.Danger).setLabel("Delete").setCustomId(confirmId),
+        new ButtonBuilder().setStyle(ButtonStyle.Secondary).setLabel("Cancel").setCustomId(cancelId),
+      ),
+    ],
+  });
+  const choice = await prompt
+    .awaitMessageComponent({ time: 60_000, filter: (i) => i.customId === confirmId || i.customId === cancelId })
+    .catch(() => null);
+  if (choice?.customId !== confirmId) {
+    const content = choice ? "Kept the receipt." : "Timed out, so I kept the receipt.";
+    await (choice ? choice.update({ content, components: [] }) : interaction.editReply({ content, components: [] }));
+    return;
+  }
+
+  // Someone else may have deleted it while the prompt was open.
+  const deleted = await interaction.message.delete().then(() => true, () => false);
+  // Best effort: the "Receipted!" link would lead nowhere now.
+  if (noticeChannelId && noticeId) {
+    const channel = await interaction.client.channels.fetch(noticeChannelId).catch(() => null);
+    if (channel?.isTextBased()) await channel.messages.delete(noticeId).catch(() => {});
+  }
+  await choice.update({ content: deleted ? "Receipt deleted." : "That receipt is already gone.", components: [] });
 }
 
 export const receiptThis: MessageCommand = {

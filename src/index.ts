@@ -1,5 +1,6 @@
 import { Client, Events, GatewayIntentBits, MessageFlags } from "discord.js";
 import { commands, messageCommands } from "./commands/index.js";
+import { deleteReceipt, isReceiptDeleteButton } from "./commands/receipt.js";
 import { config } from "./config.js";
 import { setupRepost } from "./repost.js";
 
@@ -19,12 +20,18 @@ client.once(Events.ClientReady, (readyClient) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   let run: (() => Promise<void>) | undefined;
+  let name: string;
   if (interaction.isChatInputCommand()) {
     const command = commands.get(interaction.commandName);
     if (command) run = () => command.execute(interaction);
+    name = `/${interaction.commandName}`;
   } else if (interaction.isMessageContextMenuCommand()) {
     const command = messageCommands.get(interaction.commandName);
     if (command) run = () => command.execute(interaction);
+    name = interaction.commandName;
+  } else if (interaction.isButton() && isReceiptDeleteButton(interaction)) {
+    run = () => deleteReceipt(interaction);
+    name = "receipt delete button";
   } else {
     return;
   }
@@ -33,9 +40,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     await run();
   } catch (error) {
-    console.error(`Error running /${interaction.commandName}:`, error);
+    console.error(`Error running ${name}:`, error);
     const reply = {
-      content: "Something went wrong running that command.",
+      content: "Something went wrong.",
       flags: MessageFlags.Ephemeral,
     } as const;
     if (interaction.replied || interaction.deferred) {
