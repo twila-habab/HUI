@@ -101,7 +101,7 @@ export async function deleteReceipt(interaction: ButtonInteraction): Promise<voi
   // Ask first, privately, so a stray click doesn't throw the receipt away.
   const confirmId = `receipt-confirm:${interaction.id}`;
   const cancelId = `receipt-cancel:${interaction.id}`;
-  const prompt = await interaction.reply({
+  const response = await interaction.reply({
     content: "Delete this receipt? This can't be undone.",
     flags: MessageFlags.Ephemeral,
     components: [
@@ -110,7 +110,11 @@ export async function deleteReceipt(interaction: ButtonInteraction): Promise<voi
         new ButtonBuilder().setStyle(ButtonStyle.Secondary).setLabel("Cancel").setCustomId(cancelId),
       ),
     ],
+    withResponse: true,
   });
+  // Listen on the prompt itself: collecting from `response` would watch the
+  // message the button was clicked on, which here is the receipt.
+  const prompt = response.resource!.message!;
   const choice = await prompt
     .awaitMessageComponent({ time: 60_000, filter: (i) => i.customId === confirmId || i.customId === cancelId })
     .catch(() => null);
