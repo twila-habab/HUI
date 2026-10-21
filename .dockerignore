@@ -9,3 +9,7 @@ data/
 .git/
 .github/
 *.log
+
+# Not needed in the image; keeps the build context small.
+k8s/
+README.md
