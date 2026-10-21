@@ -11,6 +11,21 @@ type Joke =
   | { error: false; type: "twopart"; setup: string; delivery: string }
   | { error: true; message: string };
 
+/**
+ * A random joke from JokeAPI, formatted for Discord, or null if it couldn't be
+ * fetched. Without a category, Dark jokes are left out.
+ */
+export async function fetchJoke(category: string = DEFAULT_CATEGORIES): Promise<string | null> {
+  const response = await fetch(`https://v2.jokeapi.dev/joke/${category}`, {
+    signal: AbortSignal.timeout(5000),
+  }).catch(() => null);
+  const joke = (await response?.json().catch(() => null)) as Joke | null;
+  if (!joke || joke.error) return null;
+
+  // Hide the punchline behind a spoiler so people can guess first.
+  return joke.type === "single" ? joke.joke : `${joke.setup}\n||${joke.delivery}||`;
+}
+
 export const jokes: Command = {
   data: new SlashCommandBuilder()
     .setName("jokes")
@@ -22,13 +37,9 @@ export const jokes: Command = {
         .addChoices(CATEGORIES.map((category) => ({ name: category, value: category }))),
     ),
   async execute(interaction) {
-    const category = interaction.options.getString("category") ?? DEFAULT_CATEGORIES;
-    const response = await fetch(`https://v2.jokeapi.dev/joke/${category}`, {
-      signal: AbortSignal.timeout(5000),
-    }).catch(() => null);
-    const joke = (await response?.json().catch(() => null)) as Joke | null;
+    const content = await fetchJoke(interaction.options.getString("category") ?? undefined);
 
-    if (!joke || joke.error) {
+    if (!content) {
       await interaction.reply({
         content: "Couldn't fetch a joke right now. Try again in a bit.",
         flags: MessageFlags.Ephemeral,
@@ -36,8 +47,6 @@ export const jokes: Command = {
       return;
     }
 
-    // Hide the punchline behind a spoiler so people can guess first.
-    const content = joke.type === "single" ? joke.joke : `${joke.setup}\n||${joke.delivery}||`;
     await interaction.reply({ content, allowedMentions: { parse: [] } });
   },
 };

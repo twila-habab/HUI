@@ -41,5 +41,9 @@ export const config = {
     ...server("hangout", "FUNNIES_ID"),
     ...server("gforce", "RECEIPTS_OF_SHAME_ID"),
   ],
+  // Every server's general channel gets a random joke daily at midnight local time (TZ).
+  dailyJokeChannelIds: ["ANON_GENERAL", "HANGOUT_GENERAL", "GFORCE_GENERAL"]
+    .map((name) => process.env[name])
+    .filter((id): id is string => !!id),
   dataDir: process.env.DATA_DIR || "data",
 };

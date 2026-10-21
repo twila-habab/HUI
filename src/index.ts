@@ -2,6 +2,7 @@ import { Client, Events, GatewayIntentBits, MessageFlags } from "discord.js";
 import { commands, messageCommands } from "./commands/index.js";
 import { deleteReceipt, isReceiptDeleteButton } from "./commands/receipt.js";
 import { config } from "./config.js";
+import { setupDailyJoke } from "./dailyJoke.js";
 import { setupRepost } from "./repost.js";
 
 const client = new Client({
@@ -16,6 +17,7 @@ const client = new Client({
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
   setupRepost(readyClient).catch((error) => console.error("Repost setup failed:", error));
+  setupDailyJoke(readyClient).catch((error) => console.error("Daily joke setup failed:", error));
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
