@@ -46,4 +46,6 @@ export const config = {
     .map((name) => process.env[name])
     .filter((id): id is string => !!id),
   dataDir: process.env.DATA_DIR || "data",
+  // Members who can use emojis from any server the bot is in.
+  emojiRelayUserIds: list("EMOJI_RELAY_USER_IDS"),
 };
