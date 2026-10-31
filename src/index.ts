@@ -4,6 +4,7 @@ import { deleteReceipt, isReceiptDeleteButton } from "./commands/receipt.js";
 import { config } from "./config.js";
 import { setupDailyJoke } from "./dailyJoke.js";
 import { checkDatabase } from "./db.js";
+import { setupEmojiRelay } from "./emojiRelay.js";
 import { setupLevels } from "./levels.js";
 import { setupRepost } from "./repost.js";
 
@@ -11,6 +12,8 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
+    // Keeps the emoji list current when servers add or remove emojis.
+    GatewayIntentBits.GuildExpressions,
     // Privileged: must also be enabled in the Developer Portal (Bot tab).
     GatewayIntentBits.MessageContent,
   ],
@@ -20,6 +23,7 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
   setupRepost(readyClient).catch((error) => console.error("Repost setup failed:", error));
   setupDailyJoke(readyClient).catch((error) => console.error("Daily joke setup failed:", error));
+  setupEmojiRelay(readyClient);
   setupLevels(readyClient).catch((error) => console.error("Levels setup failed:", error));
 });
 
