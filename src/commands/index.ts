@@ -2,12 +2,13 @@ import { Collection } from "discord.js";
 import type { Command, MessageCommand } from "./types.js";
 import { echo } from "./echo.js";
 import { jokes } from "./jokes.js";
+import { leaderboard, rank } from "./levels.js";
 import { ping } from "./ping.js";
 import { receiptMultiple, receiptThis } from "./receipt.js";
 import { reindex } from "./reindex.js";
 import { repost } from "./repost.js";
 
-const all: Command[] = [ping, echo, jokes, repost, reindex];
+const all: Command[] = [ping, echo, jokes, repost, reindex, rank, leaderboard];
 const allMessage: MessageCommand[] = [receiptThis, receiptMultiple];
 
 export const commands = new Collection<string, Command>(
