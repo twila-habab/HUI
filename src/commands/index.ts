@@ -7,8 +7,9 @@ import { ping } from "./ping.js";
 import { receiptMultiple, receiptThis } from "./receipt.js";
 import { reindex } from "./reindex.js";
 import { repost } from "./repost.js";
+import { ship } from "./ship.js";
 
-const all: Command[] = [ping, echo, jokes, repost, reindex, rank, leaderboard];
+const all: Command[] = [ping, echo, jokes, repost, reindex, rank, leaderboard, ship];
 const allMessage: MessageCommand[] = [receiptThis, receiptMultiple];
 
 export const commands = new Collection<string, Command>(
