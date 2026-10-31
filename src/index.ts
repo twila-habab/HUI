@@ -3,6 +3,7 @@ import { commands, messageCommands } from "./commands/index.js";
 import { deleteReceipt, isReceiptDeleteButton } from "./commands/receipt.js";
 import { config } from "./config.js";
 import { setupDailyJoke } from "./dailyJoke.js";
+import { checkDatabase } from "./db.js";
 import { setupRepost } from "./repost.js";
 
 const client = new Client({
@@ -55,4 +56,5 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+await checkDatabase();
 await client.login(config.token);
