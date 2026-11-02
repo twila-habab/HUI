@@ -34,15 +34,16 @@ export const config = {
   token: required("DISCORD_TOKEN"),
   clientId: required("CLIENT_ID"),
   guildIds: list("GUILD_ID"),
-  // Only anon gets the daily receipt; pass HANGOUT_GENERAL / GFORCE_GENERAL back
+  // Only anon gets the daily receipt; pass HANGOUT_GENERAL / GFORCE_GENERAL / BNS_GENERAL back
   // in below to turn it on for those servers too.
   servers: [
     ...server("anon", "DISCORD_RECEIPTS_ID", "ANON_GENERAL"),
     ...server("hangout", "FUNNIES_ID"),
     ...server("gforce", "RECEIPTS_OF_SHAME_ID"),
+    ...server("bns", "BNS_RECEIPTS_ID"),
   ],
   // Every server's general channel gets a random joke daily at midnight local time (TZ).
-  dailyJokeChannelIds: ["ANON_GENERAL", "HANGOUT_GENERAL", "GFORCE_GENERAL"]
+  dailyJokeChannelIds: ["ANON_GENERAL", "HANGOUT_GENERAL", "GFORCE_GENERAL", "BNS_GENERAL"]
     .map((name) => process.env[name])
     .filter((id): id is string => !!id),
   dataDir: process.env.DATA_DIR || "data",
